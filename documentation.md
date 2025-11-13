@@ -49,6 +49,7 @@ The script will:
 - Find an available nREPL port (default: 7888-8888 range)
 - Write the port to `PROJECT_DIR/.nrepl-port`
 - Mount your project at `/workspace`
+- Mount your `~/.claude` directory to `/root/.claude` (preserves your Claude subscription/config)
 - Forward the nREPL port from container to host
 
 ### Option 2: Manual Docker Commands
@@ -60,9 +61,10 @@ docker pull tonykayclj/clojure-node-claude:latest
 # Run interactively
 docker run -it --rm tonykayclj/clojure-node-claude:latest
 
-# Mount your project directory with nREPL port
+# Mount your project directory with nREPL port and Claude config
 docker run -it --rm \
   -v $(pwd):/workspace \
+  -v ~/.claude:/root/.claude \
   -w /workspace \
   -p 7888:7888 \
   tonykayclj/clojure-node-claude:latest
@@ -357,8 +359,8 @@ docker run --rm -v $(pwd):/app -w /app tonykayclj/clojure-node-claude:latest nod
 ```bash
 docker run -it --rm \
   -v $(pwd):/workspace \
+  -v ~/.claude:/root/.claude \
   -w /workspace \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   tonykayclj/clojure-node-claude:latest \
   claude
 ```
@@ -367,8 +369,8 @@ docker run -it --rm \
 ```bash
 docker run -it --rm \
   -v $(pwd):/workspace \
+  -v ~/.claude:/root/.claude \
   -w /workspace \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   tonykayclj/clojure-node-claude:latest \
   ccode
 ```
@@ -377,6 +379,7 @@ docker run -it --rm \
 ```bash
 docker run -it --rm \
   -v $(pwd):/workspace \
+  -v ~/.claude:/root/.claude \
   -w /workspace \
   -p 7888:7888 \
   -p 3000:3000 \

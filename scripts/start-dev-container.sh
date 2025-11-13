@@ -153,13 +153,24 @@ fi
 echo "Starting container '$CONTAINER_NAME'..."
 echo "  Project dir: $PROJECT_DIR"
 echo "  Workspace:   /workspace"
+echo "  Claude config: ~/.claude -> /root/.claude"
 echo "  nREPL port:  localhost:$HOST_PORT -> container:$CONTAINER_NREPL_PORT"
+
+# Check if ~/.claude directory exists
+CLAUDE_CONFIG_DIR="$HOME/.claude"
+CLAUDE_MOUNT_ARGS=""
+if [ -d "$CLAUDE_CONFIG_DIR" ]; then
+    CLAUDE_MOUNT_ARGS="-v $CLAUDE_CONFIG_DIR:/root/.claude"
+else
+    echo "  Note: ~/.claude not found - Claude will need to be configured in container"
+fi
 
 if [ "$START_SHELL" = true ]; then
     # Interactive shell mode
     docker run -it --rm \
         --name "$CONTAINER_NAME" \
         -v "$PROJECT_DIR:/workspace" \
+        $CLAUDE_MOUNT_ARGS \
         -w /workspace \
         -p "$HOST_PORT:$CONTAINER_NREPL_PORT" \
         "$IMAGE_NAME" \
@@ -169,6 +180,7 @@ else
     docker run -d \
         --name "$CONTAINER_NAME" \
         -v "$PROJECT_DIR:/workspace" \
+        $CLAUDE_MOUNT_ARGS \
         -w /workspace \
         -p "$HOST_PORT:$CONTAINER_NREPL_PORT" \
         "$IMAGE_NAME" \

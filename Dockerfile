@@ -1,4 +1,16 @@
 FROM babashka/babashka:latest AS babashka
+
+# Build stage for parinfer-rust
+FROM clojure:temurin-25-tools-deps AS parinfer-builder
+RUN apt-get update && apt-get install -y \
+    cargo \
+    rustc \
+    libclang-dev \
+    git \
+    && git clone --depth 1 --branch v0.4.3 https://github.com/eraserhd/parinfer-rust.git /tmp/parinfer-rust \
+    && cd /tmp/parinfer-rust \
+    && cargo build --release
+
 FROM clojure:temurin-25-tools-deps
 
 # Copy babashka from official image
@@ -12,7 +24,6 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     nodejs \
     npm \
-    awscli \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,22 +37,9 @@ RUN bb --version && \
     echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> /root/.profile && \
     echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> /root/.bashrc
 
-# Layer 1.6: Build and install parinfer-rust (requires Rust toolchain)
+# Layer 1.6: Install parinfer-rust from builder stage
 # We build from source since ARM binaries aren't provided in releases
-RUN apt-get update && apt-get install -y \
-    cargo \
-    rustc \
-    libclang-dev \
-    && git clone --depth 1 --branch v0.4.3 https://github.com/eraserhd/parinfer-rust.git /tmp/parinfer-rust \
-    && cd /tmp/parinfer-rust \
-    && cargo build --release \
-    && cp target/release/parinfer-rust /usr/local/bin/ \
-    && cd / \
-    && rm -rf /tmp/parinfer-rust /root/.cargo \
-    && apt-get remove -y cargo rustc libclang-dev \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=parinfer-builder /tmp/parinfer-rust/target/release/parinfer-rust /usr/local/bin/parinfer-rust
 
 # Layer 1.7: Install cljfmt via bbin
 ENV PATH="/usr/local/bin:/root/.local/bin:${PATH}"
@@ -52,16 +50,8 @@ RUN /usr/local/bin/bb /usr/local/bin/bbin install https://github.com/bhauman/clo
     /usr/local/bin/bb /usr/local/bin/bbin install https://github.com/bhauman/clojure-mcp-light.git --tag v0.1.1 \
       --as clj-nrepl-eval --main-opts '["-m" "clojure-mcp-light.nrepl-eval"]'
 
-# Layer 2: Install and configure nvm (rarely changes)
-ENV NVM_DIR="/root/.nvm"
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash && \
-    echo 'export NVM_DIR="$HOME/.nvm"' >> /root/.profile && \
-    echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> /root/.profile && \
-    echo '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"' >> /root/.profile && \
-    echo 'export NVM_DIR="$HOME/.nvm"' >> /root/.bashrc && \
-    echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"' >> /root/.bashrc && \
-    echo '[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"' >> /root/.bashrc && \
-    echo 'alias ccode="claude --dangerously-disable-permissions"' >> /root/.bashrc
+# Layer 2: Configure shell aliases
+RUN echo 'alias ccode="claude --dangerously-disable-permissions"' >> /root/.bashrc
 
 # Layer 3: Install global npm packages (changes when updating packages)
 # Add new global packages here, each on its own line for better caching
@@ -77,7 +67,6 @@ RUN chmod +x /usr/local/bin/claude-setup-clojure && \
 RUN node --version && \
     npm --version && \
     claude --version && \
-    bash -c '. "$NVM_DIR/nvm.sh" && nvm --version' && \
     bb --version && \
     bbin --version && \
     ls -la /usr/local/bin/parinfer-rust && \
