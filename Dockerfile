@@ -28,6 +28,7 @@ RUN apk add --no-cache \
     rlwrap \
     gcompat \
     sudo \
+    ripgrep \
     && curl -L -O https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh \
     && chmod +x linux-install.sh \
     && ./linux-install.sh \
@@ -58,6 +59,8 @@ RUN curl -sLO https://raw.githubusercontent.com/babashka/bbin/main/bbin \
     && chown -R ralph:ralph /home/ralph/.local \
     && echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> /home/ralph/.profile \
     && echo 'export PATH="/usr/local/bin:$HOME/.local/bin:$PATH"' >> /home/ralph/.bashrc \
+    && echo 'export USE_BUILTIN_RIPGREP=0' >> /home/ralph/.profile \
+    && echo 'export USE_BUILTIN_RIPGREP=0' >> /home/ralph/.bashrc \
     && echo 'alias ccode="claude --dangerously-skip-permissions"' >> /home/ralph/.bashrc \
     && chown ralph:ralph /home/ralph/.profile /home/ralph/.bashrc
 
