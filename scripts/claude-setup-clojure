@@ -1,0 +1,233 @@
+#!/usr/bin/env bb
+
+(require '[clojure.string :as str]
+         '[clojure.java.io :as io]
+         '[cheshire.core :as json])
+
+(def version "1.0.0")
+
+(def cljfmt-source "/usr/local/share/claude-clojure/.cljfmt.edn")
+
+(defn print-help []
+  (println "claude-setup-clojure v" version)
+  (println)
+  (println "Configure a Clojure project for Claude Code with clojure-mcp-light tooling.")
+  (println)
+  (println "Usage: claude-setup-clojure [OPTIONS]")
+  (println)
+  (println "Options:")
+  (println "  --force            Overwrite existing .claude/settings.local.json and commands")
+  (println "  --force-cljfmt     Overwrite existing .cljfmt.edn (default: preserve existing)")
+  (println "  --no-commands      Skip creating slash commands")
+  (println "  --no-cljfmt-hook   Disable cljfmt in hooks (default: enabled)")
+  (println "  --dry-run          Show what would be created without creating files")
+  (println "  --help, -h         Show this help message")
+  (println)
+  (println "Creates:")
+  (println "  .claude/settings.local.json  - Hook configuration for parinfer and cljfmt")
+  (println "  .cljfmt.edn                  - Code formatting configuration (if missing)")
+  (println "  .claude/commands/*.md        - Slash commands for nREPL evaluation")
+  (println)
+  (println "Examples:")
+  (println "  claude-setup-clojure                    # Setup with defaults")
+  (println "  claude-setup-clojure --dry-run          # Preview changes")
+  (println "  claude-setup-clojure --force            # Overwrite existing config")
+  (println "  claude-setup-clojure --no-commands      # Skip slash commands"))
+
+(defn parse-args [args]
+  (reduce (fn [opts arg]
+            (case arg
+              ("--help" "-h") (assoc opts :help true)
+              "--force" (assoc opts :force true)
+              "--force-cljfmt" (assoc opts :force-cljfmt true)
+              "--no-commands" (assoc opts :no-commands true)
+              "--no-cljfmt-hook" (assoc opts :cljfmt-hook false)
+              "--dry-run" (assoc opts :dry-run true)
+              (do
+                (println "Unknown option:" arg)
+                (println "Use --help for usage information")
+                (System/exit 1))))
+          {:force false
+           :force-cljfmt false
+           :no-commands false
+           :cljfmt-hook true
+           :dry-run false
+           :help false}
+          args))
+
+(defn settings-json [cljfmt-enabled?]
+  (let [hook-cmd (if cljfmt-enabled?
+                   "clj-paren-repair-claude-hook --cljfmt"
+                   "clj-paren-repair-claude-hook")]
+    {:hooks
+     {:PreToolUse
+      [{:matcher "Write|Edit"
+        :hooks [{:type "command"
+                 :command hook-cmd}]}]
+      :PostToolUse
+      [{:matcher "Edit|Write"
+        :hooks [{:type "command"
+                 :command hook-cmd}]}]
+      :SessionEnd
+      [{:hooks [{:type "command"
+                 :command hook-cmd}]}]}}))
+
+(defn clojure-eval-command []
+  "# Clojure Eval
+
+Evaluate Clojure code in a running nREPL server.
+
+Usage: First start an nREPL server in your project:
+```bash
+clojure -M:dev:nrepl
+```
+
+Then use this command to evaluate code against that server.
+
+The clj-nrepl-eval tool will automatically discover running nREPL servers
+or you can specify a port with the -p flag.
+
+Options:
+- --discover-ports: List available nREPL servers
+- -p PORT: Connect to specific port
+- --timeout MS: Set evaluation timeout (default: 30000ms)
+
+Examples:
+```clojure
+(+ 1 2 3)
+(require '[my.app :refer [start!]])
+(start!)
+```")
+
+(defn start-nrepl-command []
+  "# Start nREPL
+
+Instructions for starting an nREPL server for your Clojure project.
+
+## For deps.edn (tools.deps) projects:
+
+Add to your deps.edn:
+```clojure
+{:aliases
+ {:nrepl
+  {:extra-deps {nrepl/nrepl {:mvn/version \"1.1.0\"}
+                cider/cider-nrepl {:mvn/version \"0.47.1\"}}
+   :main-opts [\"-m\" \"nrepl.cmdline\" \"--middleware\" \"[cider.nrepl/cider-middleware]\"]}}}
+```
+
+Then start with:
+```bash
+clojure -M:nrepl
+```
+
+## For Leiningen (project.clj) projects:
+
+Add to your project.clj plugins:
+```clojure
+:plugins [[cider/cider-nrepl \"0.47.1\"]]
+```
+
+Then start with:
+```bash
+lein repl
+```
+
+## For shadow-cljs projects:
+
+```bash
+npx shadow-cljs watch app
+```
+
+The nREPL server starts automatically with shadow-cljs.")
+
+(defn file-exists? [path]
+  (.exists (io/file path)))
+
+(defn write-file! [path content dry-run?]
+  (if dry-run?
+    (println "  [DRY RUN] Would write:" path)
+    (do
+      (io/make-parents path)
+      (spit path content)
+      (println "  ✓ Created:" path))))
+
+(defn copy-file! [src dest dry-run?]
+  (if dry-run?
+    (println "  [DRY RUN] Would copy:" src "->" dest)
+    (do
+      (io/copy (io/file src) (io/file dest))
+      (println "  ✓ Copied:" dest))))
+
+(defn main [& args]
+  (let [opts (parse-args args)]
+    (when (:help opts)
+      (print-help)
+      (System/exit 0))
+
+    (println "Claude Code Clojure Setup")
+    (println "=" (str/join (repeat 25 "=")))
+    (println)
+
+    (when (:dry-run opts)
+      (println "DRY RUN MODE - No files will be created")
+      (println))
+
+    ;; Create .claude directory
+    (when-not (and (file-exists? ".claude") (not (:dry-run opts)))
+      (when-not (:dry-run opts)
+        (.mkdirs (io/file ".claude"))))
+
+    ;; Handle settings.local.json
+    (let [settings-path ".claude/settings.local.json"
+          settings-exists? (file-exists? settings-path)]
+      (cond
+        (and settings-exists? (not (:force opts)))
+        (println "  ⊘ Skipped:" settings-path "(already exists, use --force to overwrite)")
+
+        :else
+        (let [json-str (json/generate-string (settings-json (:cljfmt-hook opts))
+                                              {:pretty true})]
+          (write-file! settings-path json-str (:dry-run opts)))))
+
+    ;; Handle .cljfmt.edn
+    (let [cljfmt-dest ".cljfmt.edn"
+          cljfmt-exists? (file-exists? cljfmt-dest)
+          source-exists? (file-exists? cljfmt-source)]
+      (cond
+        (not source-exists?)
+        (println "  ⚠ Warning: Source .cljfmt.edn not found at" cljfmt-source)
+
+        (and cljfmt-exists? (not (:force-cljfmt opts)))
+        (println "  ⊘ Skipped:" cljfmt-dest "(already exists, use --force-cljfmt to overwrite)")
+
+        :else
+        (copy-file! cljfmt-source cljfmt-dest (:dry-run opts))))
+
+    ;; Handle slash commands
+    (when-not (:no-commands opts)
+      (let [commands-dir ".claude/commands"]
+        (when-not (:dry-run opts)
+          (.mkdirs (io/file commands-dir)))
+
+        (let [eval-path (str commands-dir "/clojure-eval.md")
+              eval-exists? (file-exists? eval-path)]
+          (when (or (not eval-exists?) (:force opts))
+            (write-file! eval-path (clojure-eval-command) (:dry-run opts))))
+
+        (let [nrepl-path (str commands-dir "/start-nrepl.md")
+              nrepl-exists? (file-exists? nrepl-path)]
+          (when (or (not nrepl-exists?) (:force opts))
+            (write-file! nrepl-path (start-nrepl-command) (:dry-run opts))))))
+
+    (println)
+    (if (:dry-run opts)
+      (println "Dry run complete. Run without --dry-run to create files.")
+      (println "Setup complete! Your project is now configured for Claude Code with Clojure tooling."))
+
+    (println)
+    (println "Next steps:")
+    (println "  1. Start an nREPL server (see .claude/commands/start-nrepl.md)")
+    (println "  2. Use Claude Code - hooks will automatically fix Clojure delimiters")
+    (println "  3. Use /clojure-eval to evaluate code in your running REPL")))
+
+(apply main *command-line-args*)
