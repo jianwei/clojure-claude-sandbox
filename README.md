@@ -17,14 +17,19 @@ subscription then it'll "just work".
 
 ## Usage
 
-Copy the scripts/start-dev-container.sh to someplace on your path. The docker container itself is published for Macs (arm). If you want it for something else, build it yourself.
+Copy the scripts/start-dev-container.sh to someplace on your path. 
+The docker container itself is published for Macs (arm). If you want it for something else, 
+you can build it yourself.
 
 ```bash
 cd project-you-want-to-work-on
 start-dev-container.sh .
+cc838dd6a9bb:/workspace$ claude 
+# or use the ccode alias, which is the same as:
+claude --dangerously-skip-permissions
 ```
 
-See the usage output (no args) for other options. This script currently does
+See the usage output (no args) for other options on the start script. The script currently does
 try to expose port 7888 from inside the container to some random port on the
 host (and writes it to .nrepl-port) so you can jack into/connect to the nrepl
 INSIDE the container, assuming you run your REPL on 7888.
