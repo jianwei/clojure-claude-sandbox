@@ -33,13 +33,21 @@ Babashka script (v1.0.0) that configures Clojure projects for Claude Code. Creat
 The script preserves existing files by default and supports `--force`, `--force-cljfmt`, `--no-commands`, `--no-cljfmt-hook`, and `--dry-run` options.
 
 ### Container Startup Script (`scripts/start-dev-container.sh`)
-Bash script (v1.0.0) that simplifies starting development containers:
+Bash script (v1.1.0) that simplifies starting development containers:
 - Auto-discovers available nREPL port (7888-8888 range)
 - Writes port to `.nrepl-port` in project directory
 - Mounts project directory at `/workspace`
 - Mounts Claude config directory to `/home/ralph/.claude`
 - Supports custom container names, ports, and Claude config directories
 - Offers both interactive shell and daemon modes
+- **SSH credential management** with three modes:
+  - **auto** (default): Detects git remotes and mounts only required SSH keys
+  - **agent**: Uses SSH agent forwarding (requires `SSH_AUTH_SOCK`)
+  - **manual**: Mount specific keys with `--ssh-key` option
+  - **none**: No SSH credentials mounted
+- **Compatibility**: Works with macOS default bash 3.2 (v1.1.0+ removes bash 4.x dependencies)
+- **SSH Config Parsing**: Supports both standard (`Host foo`) and non-standard (`Host=foo`) formats
+- **Daemon Mode**: Correctly handles SSH temp directory lifecycle (v1.1.0+ fix)
 
 ### Configuration Files
 - `.cljfmt.edn` - Code formatting configuration with 2-space indentation (matching IntelliJ/Cursive defaults) and aligned map columns
@@ -103,6 +111,11 @@ docker run --rm tonykayclj/clojure-node-claude:latest bash -c \
 
 # Using alternate Claude config (for different accounts)
 ./scripts/start-dev-container.sh --claude-config ~/.claude-work ~/projects/my-app
+
+# SSH credential modes (default: auto)
+./scripts/start-dev-container.sh --ssh agent ~/projects/my-app      # SSH agent forwarding
+./scripts/start-dev-container.sh --ssh none ~/projects/my-app       # No SSH credentials
+./scripts/start-dev-container.sh --ssh-key ~/.ssh/work_key ~/projects/my-app  # Specific key
 ```
 
 ### Setting Up a Project for Claude Code

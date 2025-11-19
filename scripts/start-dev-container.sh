@@ -2,7 +2,7 @@
 
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 IMAGE_NAME="tonykayclj/clojure-node-claude:latest"
 CONTAINER_NREPL_PORT=7888
 
@@ -21,20 +21,30 @@ Options:
   -n, --name NAME          Container name (default: auto-generated from project dir)
   -p, --port PORT          Host port for nREPL (default: auto-discover)
   -c, --claude-config DIR  Claude config directory (default: ~/.claude)
+  -s, --ssh MODE           SSH credential mode: auto|agent|none (default: auto)
+  --ssh-key PATH           Specific SSH key to mount (can be used multiple times)
   --daemon                 Start in daemon mode
   -h, --help               Show this help message
+
+SSH Modes:
+  auto    - Detect git remotes and mount only required SSH keys (default)
+  agent   - Use SSH agent forwarding (requires SSH_AUTH_SOCK)
+  none    - No SSH credentials mounted
 
 The script will:
   1. Find an available non-privileged port on the host (or use specified port)
   2. Write the port number to PROJECT_DIR/.nrepl-port
   3. Start the container with PROJECT_DIR mounted at /workspace
   4. Mount Claude config directory to /home/ralph/.claude
-  5. Forward the host port to container port ${CONTAINER_NREPL_PORT} for nREPL
+  5. Configure SSH credentials based on --ssh mode
+  6. Forward the host port to container port ${CONTAINER_NREPL_PORT} for nREPL
 
 Examples:
   $(basename "$0") ~/projects/my-clojure-app
   $(basename "$0") --name my-repl --port 7888 ~/projects/my-app
   $(basename "$0") --claude-config ~/.claude-work ~/projects/my-app
+  $(basename "$0") --ssh agent ~/projects/my-app
+  $(basename "$0") --ssh-key ~/.ssh/id_ed25519 ~/projects/my-app
 EOF
 }
 
@@ -55,12 +65,135 @@ find_available_port() {
     return 1
 }
 
+# Extract SSH hosts from git remotes
+get_git_ssh_hosts() {
+    local project_dir="$1"
+    local hosts=()
+
+    if [ ! -d "$project_dir/.git" ]; then
+        return 0
+    fi
+
+    # Get all git remotes and extract SSH hosts
+    while IFS= read -r remote_url; do
+        # Match SSH URLs like git@github.com:user/repo.git
+        if [[ "$remote_url" =~ ^([^@]+@)?([^:]+): ]]; then
+            local host="${BASH_REMATCH[2]}"
+            hosts+=("$host")
+        # Match SSH URLs like ssh://git@github.com/user/repo.git
+        elif [[ "$remote_url" =~ ^ssh://([^@]+@)?([^/]+)/ ]]; then
+            local host="${BASH_REMATCH[2]}"
+            hosts+=("$host")
+        fi
+    done < <(cd "$project_dir" && git remote -v 2>/dev/null | awk '{print $2}' | sort -u)
+
+    # Return unique hosts
+    printf '%s\n' "${hosts[@]}" | sort -u
+}
+
+# Find SSH key for a given host
+find_ssh_key_for_host() {
+    local host="$1"
+    local ssh_config="$HOME/.ssh/config"
+    local identity_file=""
+
+    # Check SSH config for IdentityFile directive
+    if [ -f "$ssh_config" ]; then
+        # Look for Host block matching this host
+        local in_host_block=0
+        while IFS= read -r line; do
+            # Check if we're entering a relevant Host block (supports both "Host foo" and "Host=foo")
+            if [[ "$line" =~ ^[[:space:]]*Host[=[:space:]]+(.+)$ ]]; then
+                local host_pattern="${BASH_REMATCH[1]}"
+                # Simple pattern matching (supports wildcards)
+                if [[ "$host" == $host_pattern ]]; then
+                    in_host_block=1
+                else
+                    in_host_block=0
+                fi
+            # Match IdentityFile (supports both "IdentityFile foo" and "IdentityFile=foo")
+            elif [[ $in_host_block -eq 1 && "$line" =~ ^[[:space:]]*IdentityFile[=[:space:]]+(.+)$ ]]; then
+                identity_file="${BASH_REMATCH[1]}"
+                # Expand ~ to home directory
+                identity_file="${identity_file/#\~/$HOME}"
+                break
+            fi
+        done < "$ssh_config"
+    fi
+
+    # If no specific key found, use default keys
+    if [ -z "$identity_file" ]; then
+        for default_key in "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ecdsa"; do
+            if [ -f "$default_key" ]; then
+                identity_file="$default_key"
+                break
+            fi
+        done
+    fi
+
+    echo "$identity_file"
+}
+
+# Detect SSH keys needed for project
+detect_ssh_keys() {
+    local project_dir="$1"
+    local keys=()
+
+    # Get SSH hosts from git remotes
+    while IFS= read -r host; do
+        [ -z "$host" ] && continue
+        local key=$(find_ssh_key_for_host "$host")
+        if [ -n "$key" ] && [ -f "$key" ]; then
+            keys+=("$key")
+        fi
+    done < <(get_git_ssh_hosts "$project_dir")
+
+    # Return unique keys
+    printf '%s\n' "${keys[@]}" | sort -u
+}
+
+# Setup SSH directory with selective key mounting
+# Pass keys as separate arguments: setup_ssh_dir "${keys[@]}"
+setup_ssh_dir() {
+    local ssh_temp_dir=$(mktemp -d)
+
+    # Copy each key and its public counterpart
+    for key in "$@"; do
+        if [ -f "$key" ]; then
+            cp "$key" "$ssh_temp_dir/$(basename "$key")"
+            chmod 600 "$ssh_temp_dir/$(basename "$key")"
+
+            # Copy public key if it exists
+            if [ -f "${key}.pub" ]; then
+                cp "${key}.pub" "$ssh_temp_dir/$(basename "${key}.pub")"
+                chmod 644 "$ssh_temp_dir/$(basename "${key}.pub")"
+            fi
+        fi
+    done
+
+    # Copy known_hosts if it exists
+    if [ -f "$HOME/.ssh/known_hosts" ]; then
+        cp "$HOME/.ssh/known_hosts" "$ssh_temp_dir/known_hosts"
+        chmod 644 "$ssh_temp_dir/known_hosts"
+    fi
+
+    # Copy SSH config if it exists
+    if [ -f "$HOME/.ssh/config" ]; then
+        cp "$HOME/.ssh/config" "$ssh_temp_dir/config"
+        chmod 600 "$ssh_temp_dir/config"
+    fi
+
+    echo "$ssh_temp_dir"
+}
+
 # Parse arguments
 CONTAINER_NAME=""
 HOST_PORT=""
 START_SHELL=true
 PROJECT_DIR=""
 CLAUDE_CONFIG_DIR=""
+SSH_MODE="auto"
+SSH_KEYS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -74,6 +207,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         -c|--claude-config)
             CLAUDE_CONFIG_DIR="$2"
+            shift 2
+            ;;
+        -s|--ssh)
+            SSH_MODE="$2"
+            if [[ ! "$SSH_MODE" =~ ^(auto|agent|none)$ ]]; then
+                echo "ERROR: Invalid SSH mode: $SSH_MODE (must be auto, agent, or none)" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        --ssh-key)
+            SSH_KEYS+=("$2")
             shift 2
             ;;
         --daemon)
@@ -171,11 +316,92 @@ else
     CLAUDE_STATUS="not found - Claude will need to be configured in container"
 fi
 
+# Setup SSH credentials
+SSH_MOUNT_ARGS=""
+SSH_STATUS="none"
+SSH_TEMP_DIR=""
+CLEANUP_REQUIRED=false
+
+# If --ssh-key was provided, override SSH_MODE to use those specific keys
+if [ ${#SSH_KEYS[@]} -gt 0 ]; then
+    SSH_MODE="manual"
+fi
+
+case "$SSH_MODE" in
+    auto)
+        # Detect SSH keys from git config
+        echo "Detecting SSH keys from git remotes..."
+        DETECTED_KEYS=()
+        while IFS= read -r key; do
+            [ -n "$key" ] && DETECTED_KEYS+=("$key")
+        done < <(detect_ssh_keys "$PROJECT_DIR")
+
+        if [ ${#DETECTED_KEYS[@]} -gt 0 ]; then
+            SSH_TEMP_DIR=$(setup_ssh_dir "${DETECTED_KEYS[@]}")
+            SSH_MOUNT_ARGS="-v $SSH_TEMP_DIR:/home/ralph/.ssh"
+            SSH_STATUS="auto-detected: ${DETECTED_KEYS[*]}"
+            CLEANUP_REQUIRED=true
+            echo "Found ${#DETECTED_KEYS[@]} SSH key(s): ${DETECTED_KEYS[*]}"
+        else
+            echo "No SSH keys detected from git remotes"
+            SSH_STATUS="auto-detect: no keys found"
+        fi
+        ;;
+    agent)
+        # Use SSH agent forwarding
+        if [ -z "$SSH_AUTH_SOCK" ]; then
+            echo "WARNING: SSH_AUTH_SOCK not set, SSH agent forwarding unavailable" >&2
+            SSH_STATUS="agent: SSH_AUTH_SOCK not set"
+        else
+            SSH_MOUNT_ARGS="-v $SSH_AUTH_SOCK:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent"
+            SSH_STATUS="agent forwarding: $SSH_AUTH_SOCK"
+        fi
+        ;;
+    manual)
+        # Use explicitly specified SSH keys
+        if [ ${#SSH_KEYS[@]} -eq 0 ]; then
+            echo "ERROR: --ssh-key specified but no keys provided" >&2
+            exit 1
+        fi
+
+        # Validate all keys exist
+        for key in "${SSH_KEYS[@]}"; do
+            if [ ! -f "$key" ]; then
+                echo "ERROR: SSH key not found: $key" >&2
+                exit 1
+            fi
+        done
+
+        SSH_TEMP_DIR=$(setup_ssh_dir "${SSH_KEYS[@]}")
+        SSH_MOUNT_ARGS="-v $SSH_TEMP_DIR:/home/ralph/.ssh"
+        SSH_STATUS="manual: ${SSH_KEYS[*]}"
+        CLEANUP_REQUIRED=true
+        ;;
+    none)
+        SSH_STATUS="disabled"
+        ;;
+esac
+
+# Cleanup function for SSH temp directory
+cleanup_ssh() {
+    # Only cleanup in interactive mode (daemon containers need persistent SSH mounts)
+    if [ "$START_SHELL" = true ] && [ "$CLEANUP_REQUIRED" = true ] && [ -n "$SSH_TEMP_DIR" ] && [ -d "$SSH_TEMP_DIR" ]; then
+        echo "Cleaning up temporary SSH directory: $SSH_TEMP_DIR"
+        rm -rf "$SSH_TEMP_DIR"
+    fi
+}
+
+# Register cleanup on exit for interactive mode only
+if [ "$START_SHELL" = true ]; then
+    trap cleanup_ssh EXIT INT TERM
+fi
+
 # Start container
 echo "Starting container '$CONTAINER_NAME'..."
 echo "  Project dir:    $PROJECT_DIR"
 echo "  Workspace:      /workspace"
 echo "  Claude config:  $CLAUDE_STATUS"
+echo "  SSH:            $SSH_STATUS"
 echo "  nREPL port:     localhost:$HOST_PORT -> container:$CONTAINER_NREPL_PORT"
 echo "  User:           ralph (with sudo)"
 
@@ -185,6 +411,7 @@ if [ "$START_SHELL" = true ]; then
         --name "$CONTAINER_NAME" \
         -v "$PROJECT_DIR:/workspace" \
         $CLAUDE_MOUNT_ARGS \
+        $SSH_MOUNT_ARGS \
         -w /workspace \
         -p "$HOST_PORT:$CONTAINER_NREPL_PORT" \
         "$IMAGE_NAME" \
@@ -195,6 +422,7 @@ else
         --name "$CONTAINER_NAME" \
         -v "$PROJECT_DIR:/workspace" \
         $CLAUDE_MOUNT_ARGS \
+        $SSH_MOUNT_ARGS \
         -w /workspace \
         -p "$HOST_PORT:$CONTAINER_NREPL_PORT" \
         "$IMAGE_NAME" \
@@ -208,6 +436,9 @@ else
     echo ""
     echo "To stop the container:"
     echo "  docker stop $CONTAINER_NAME"
+    if [ -n "$SSH_TEMP_DIR" ] && [ -d "$SSH_TEMP_DIR" ]; then
+        echo "  rm -rf $SSH_TEMP_DIR  # Cleanup SSH temp directory"
+    fi
     echo ""
     echo "To view logs:"
     echo "  docker logs $CONTAINER_NAME"
