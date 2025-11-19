@@ -20,7 +20,6 @@ Arguments:
 Options:
   -n, --name NAME          Container name (default: auto-generated from project dir)
   -p, --port PORT          Host port for nREPL (default: auto-discover)
-  -w, --playwright PORT    Host port for Playwright server (optional)
   -c, --claude-config DIR  Claude config directory (default: ~/.claude)
   --daemon                 Start in daemon mode
   -h, --help               Show this help message
@@ -35,7 +34,6 @@ The script will:
 Examples:
   $(basename "$0") ~/projects/my-clojure-app
   $(basename "$0") --name my-repl --port 7888 ~/projects/my-app
-  $(basename "$0") --playwright 8888 ~/projects/my-app
   $(basename "$0") --claude-config ~/.claude-work ~/projects/my-app
 EOF
 }
@@ -60,7 +58,6 @@ find_available_port() {
 # Parse arguments
 CONTAINER_NAME=""
 HOST_PORT=""
-PLAYWRIGHT_PORT=""
 START_SHELL=true
 PROJECT_DIR=""
 CLAUDE_CONFIG_DIR=""
@@ -73,10 +70,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         -p|--port)
             HOST_PORT="$2"
-            shift 2
-            ;;
-        -w|--playwright)
-            PLAYWRIGHT_PORT="$2"
             shift 2
             ;;
         -c|--claude-config)
@@ -178,22 +171,12 @@ else
     CLAUDE_STATUS="not found - Claude will need to be configured in container"
 fi
 
-# Setup Playwright port forwarding if specified
-if [ -n "$PLAYWRIGHT_PORT" ]; then
-    PLAYWRIGHT_PORT_ARGS="-p $PLAYWRIGHT_PORT:$PLAYWRIGHT_PORT"
-    PLAYWRIGHT_STATUS="localhost:$PLAYWRIGHT_PORT -> container:$PLAYWRIGHT_PORT"
-else
-    PLAYWRIGHT_PORT_ARGS=""
-    PLAYWRIGHT_STATUS="not configured"
-fi
-
 # Start container
 echo "Starting container '$CONTAINER_NAME'..."
 echo "  Project dir:    $PROJECT_DIR"
 echo "  Workspace:      /workspace"
 echo "  Claude config:  $CLAUDE_STATUS"
 echo "  nREPL port:     localhost:$HOST_PORT -> container:$CONTAINER_NREPL_PORT"
-echo "  Playwright:     $PLAYWRIGHT_STATUS"
 echo "  User:           ralph (with sudo)"
 
 if [ "$START_SHELL" = true ]; then
@@ -204,7 +187,6 @@ if [ "$START_SHELL" = true ]; then
         $CLAUDE_MOUNT_ARGS \
         -w /workspace \
         -p "$HOST_PORT:$CONTAINER_NREPL_PORT" \
-        $PLAYWRIGHT_PORT_ARGS \
         "$IMAGE_NAME" \
         /bin/bash
 else
@@ -215,7 +197,6 @@ else
         $CLAUDE_MOUNT_ARGS \
         -w /workspace \
         -p "$HOST_PORT:$CONTAINER_NREPL_PORT" \
-        $PLAYWRIGHT_PORT_ARGS \
         "$IMAGE_NAME" \
         tail -f /dev/null
 

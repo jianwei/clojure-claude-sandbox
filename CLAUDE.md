@@ -39,7 +39,6 @@ Bash script (v1.0.0) that simplifies starting development containers:
 - Mounts project directory at `/workspace`
 - Mounts Claude config directory to `/home/ralph/.claude`
 - Supports custom container names, ports, and Claude config directories
-- Supports `--playwright PORT` flag for forwarding Playwright/CDP connections
 - Offers both interactive shell and daemon modes
 
 ### Configuration Files
@@ -48,35 +47,35 @@ Bash script (v1.0.0) that simplifies starting development containers:
 
 ## Playwright Integration
 
-This image supports browser automation via Playwright MCP by running the MCP server on the host Mac with network transport. Playwright does not officially support Alpine Linux on ARM64, so the MCP server and browsers run on the host, and the container connects via HTTP/SSE.
+This image supports browser automation via Playwright MCP by running the MCP server on the host Mac with network transport. Playwright does not officially support Alpine Linux on ARM64, so the MCP server and browsers run on the host, and the container connects via HTTP (using `/mcp` or legacy `/sse` endpoints).
 
 ### Architecture
 
-1. **Run Playwright MCP Server on Mac** with `--port` flag for network transport
-2. **Forward Port** using `--playwright` flag when starting container
-3. **Container Connects** via `http://host.docker.internal:PORT/sse`
+1. **Run Playwright MCP Server on Mac** with `--port` and `--allowed-hosts '*'` flags for network transport
+2. **Start Container** normally (no port forwarding needed)
+3. **Container Connects** to host via `http://host.docker.internal:PORT/mcp` (or legacy `/sse`)
 
 ### Two Modes
 
 **Headless Mode** (automated testing/scraping):
-- Command: `npx @playwright/mcp@latest --port 8931`
+- Command: `npx @playwright/mcp@latest --port 8931 --allowed-hosts '*'`
 - Launches fresh browser instances
 - No logged-in state or cookies
-- Use `--playwright 8931` flag when starting container
 
 **Extension Mode** (logged-in sessions):
-- Command: `npx @playwright/mcp@latest --extension --port 8931`
+- Command: `npx @playwright/mcp@latest --extension --port 8931 --allowed-hosts '*'`
 - Requires Playwright MCP Bridge Chrome extension
 - Access to logged-in sessions, cookies, browser state
 - Tab selection UI on first interaction
-- Use `--playwright 8931` flag when starting container
 
 ### Network Architecture
 
-- The `--playwright PORT` flag adds `-p PORT:PORT` to docker run command
-- From inside container, MCP clients connect to `http://host.docker.internal:PORT/sse`
-- Port forwarding is bidirectional
+- Playwright MCP server runs on the host Mac (not in the container)
+- No port forwarding needed - container connects outward to the host
+- From inside container, MCP clients connect to `http://host.docker.internal:PORT/mcp` (or legacy `/sse`)
 - Default MCP server port is 8931 (customizable)
+- The `--allowed-hosts '*'` flag is required to allow connections from the Docker container
+- `host.docker.internal` automatically resolves to the host machine's localhost from inside the container
 
 ## Common Development Tasks
 
@@ -101,9 +100,6 @@ docker run --rm tonykayclj/clojure-node-claude:latest bash -c \
 
 # With custom options
 ./scripts/start-dev-container.sh --name my-repl --port 7890 ~/projects/my-app
-
-# With Playwright support (MCP server with --port)
-./scripts/start-dev-container.sh --playwright 8931 ~/projects/my-app
 
 # Using alternate Claude config (for different accounts)
 ./scripts/start-dev-container.sh --claude-config ~/.claude-work ~/projects/my-app

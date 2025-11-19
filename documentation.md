@@ -290,23 +290,27 @@ npx playwright install chromium
 
 **For headless browsers** (automated testing/scraping):
 ```bash
-npx @playwright/mcp@latest --port 8931
+npx @playwright/mcp@latest --port 8931 --allowed-hosts '*'
 ```
 
 **For logged-in sessions** (uses your Chrome cookies/sessions):
 ```bash
-npx @playwright/mcp@latest --extension --port 8931
+npx @playwright/mcp@latest --extension --port 8931 --allowed-hosts '*'
 ```
 
 Keep this running in a terminal. You should see output indicating the server is listening on port 8931.
 
 When using `--extension`, the first time the MCP server interacts with the browser, the extension will display a tab selection interface where you can choose which browser tab to control.
 
-#### 3. Start Your Container with Port Forwarding
+**Note:** The `--allowed-hosts '*'` flag is required to allow connections from the Docker container. Without this flag, the MCP server will reject connections from `host.docker.internal`, which is how the container accesses your Mac's localhost.
+
+#### 3. Start Your Container
 
 ```bash
-./scripts/start-dev-container.sh --playwright 8931 ~/projects/my-app
+./scripts/start-dev-container.sh ~/projects/my-app
 ```
+
+**Important:** No port forwarding is needed! The Playwright MCP server runs on your host Mac, and the container connects outward to it via `host.docker.internal:8931`. You do NOT need to expose port 8931 from the container.
 
 #### 4. Configure MCP Client Inside the Container
 
@@ -327,17 +331,16 @@ The `host.docker.internal` hostname automatically resolves to your Mac from insi
 
 ### Startup Script Options
 
-The `--playwright` flag forwards the specified port for Playwright MCP connectivity:
+The startup script supports various options for customizing your development environment:
 
 ```bash
-# Basic usage with default port
-./scripts/start-dev-container.sh --playwright 8931 ~/projects/my-app
+# Basic usage
+./scripts/start-dev-container.sh ~/projects/my-app
 
-# Combined with other options
+# With custom options
 ./scripts/start-dev-container.sh \
   --name my-dev \
   --port 7888 \
-  --playwright 8931 \
   --claude-config ~/.claude \
   ~/projects/my-app
 ```
@@ -346,7 +349,7 @@ The `--playwright` flag forwards the specified port for Playwright MCP connectiv
 
 | Feature | Headless Mode | Extension Mode |
 |---------|---------------|----------------|
-| Command | `npx @playwright/mcp@latest --port 8931` | `npx @playwright/mcp@latest --extension --port 8931` |
+| Command | `npx @playwright/mcp@latest --port 8931 --allowed-hosts '*'` | `npx @playwright/mcp@latest --extension --port 8931 --allowed-hosts '*'` |
 | Browser | Launches fresh browser | Uses your existing Chrome |
 | Sessions | No logged-in state | Access to logged-in sessions |
 | Cookies | None | Your existing cookies |
@@ -370,9 +373,10 @@ The `--playwright` flag forwards the specified port for Playwright MCP connectiv
 
 **"Connection refused" errors**:
 - Ensure the Playwright MCP server is running on your Mac
-- Verify the port number (8931) matches between server and `--playwright` flag
+- Verify the port number (8931) matches in both the MCP server command and your MCP client configuration
 - Check that no firewall is blocking localhost connections
 - Confirm the server started successfully (check terminal output)
+- Verify the server is using `--allowed-hosts '*'` flag
 
 **Extension not working**:
 - Verify the extension is installed and enabled in `chrome://extensions/`
@@ -382,8 +386,9 @@ The `--playwright` flag forwards the specified port for Playwright MCP connectiv
 
 **MCP client can't connect**:
 - Use `http://host.docker.internal:8931/mcp` not `http://localhost:8931/mcp`
-- Verify port forwarding: `docker port <container-name>`
+- Verify the MCP server is running on your Mac (host machine)
 - Check the MCP server is using `--port` flag (required for network transport)
+- Verify the MCP server is using `--allowed-hosts '*'` flag
 
 **Wrong browser/tab being controlled**:
 - The extension shows a tab selector on first use - choose carefully
@@ -399,7 +404,6 @@ start-dev-container.sh [OPTIONS] PROJECT_DIR
 Options:
   -n, --name NAME          Container name (default: auto-generated from project dir)
   -p, --port PORT          Host port for nREPL (default: auto-discover)
-  -w, --playwright PORT    Host port for Playwright server (optional)
   -c, --claude-config DIR  Claude config directory (default: ~/.claude)
   --daemon                 Start in daemon mode
   --shell                  Start an interactive shell instead of daemon mode
@@ -411,9 +415,6 @@ Examples:
 
   # Start with custom name and port
   start-dev-container.sh --name my-repl --port 7890 ~/projects/my-app
-
-  # With Playwright support
-  start-dev-container.sh --playwright 8931 ~/projects/my-app
 
   # Use alternate Claude config (for different accounts)
   start-dev-container.sh --claude-config ~/.claude-work ~/projects/my-app

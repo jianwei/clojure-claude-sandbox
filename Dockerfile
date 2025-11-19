@@ -24,6 +24,7 @@ RUN apk add --no-cache \
     bash \
     curl \
     git \
+    openssh \
     ca-certificates \
     rlwrap \
     gcompat \
