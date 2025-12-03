@@ -1,0 +1,15 @@
+{:aliases   {:i18n-dev       {:override-deps {com.fulcrologic/fulcro-i18n {:local/root "/workspace/fulcro-i18n"}}}
+             :native-dev     {:override-deps {com.fulcrologic/fulcro-native {:local/root "/workspace/fulcro-native"}}}
+             :test-filter-dev     {:override-deps {com.fulcrologic/test-filter {:local/root "/workspace/test-filter"}}}
+             :gr-dev         {:override-deps {com.fulcrologic/guardrails {:local/root "/workspace/guardrails"}}}
+             :fdremote-dev         {:override-deps {com.fulcrologic/fulcro-devtools-remote {:local/root "/workspace/fulcro-devtools-remote"}}}
+             :statecharts-dev    {:override-deps {com.fulcrologic/statecharts {:local/root "/workspace/statecharts"}}}
+             :f3-dev         {:override-deps {com.fulcrologic/fulcro {:local/root "/workspace/fulcro"}}}
+             :rad-dev        {:override-deps {com.fulcrologic/fulcro-rad               {:local/root "/workspace/fulcro-rad"}
+                                              com.fulcrologic/fulcro-rad-semantic-ui   {:local/root "/workspace/fulcro-rad-semantic-ui"}
+                                              com.fulcrologic/fulcro-rad-datomic       {:local/root "/workspace/fulcro-rad-datomic"
+                                                                                        :exclusions [com.datomic/datomic-free]}}}
+             :fspec-dev      {:override-deps {fulcrologic/fulcro-spec {:local/root "/workspace/fulcro-spec"}}}
+             :fws-dev        {:override-deps {com.fulcrologic/fulcro-websockets {:local/root "/workspace/fulcro-websockets"}}}
+             :sui-dev        {:override-deps {com.fulcrologic/semantic-ui-wrapper {:local/root "/workspace/semantic-ui-wrapper"}}}
+             :css-dev        {:override-deps {com.fulcrologic/fulcro-garden-css {:local/root "/workspace/fulcro-garden-css"}}}}}

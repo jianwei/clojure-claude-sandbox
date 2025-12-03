@@ -39,6 +39,7 @@ RUN apk add --no-cache \
     rlwrap \
     gcompat \
     sudo \
+    vim \
     ripgrep \
     && curl -L -O https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh \
     && chmod +x linux-install.sh \
@@ -66,12 +67,11 @@ RUN curl -sLO https://raw.githubusercontent.com/babashka/bbin/main/bbin \
     && mkdir -p /home/ralph/.local/bin /home/ralph/.npm-global \
     && chown -R ralph:ralph /home/ralph/.local /home/ralph/.npm-global \
     && echo 'export NPM_CONFIG_PREFIX="$HOME/.npm-global"' >> /home/ralph/.profile \
-    && echo 'export NPM_CONFIG_PREFIX="$HOME/.npm-global"' >> /home/ralph/.bashrc \
     && echo 'export PATH="/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"' >> /home/ralph/.profile \
-    && echo 'export PATH="/usr/local/bin:$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"' >> /home/ralph/.bashrc \
     && echo 'export USE_BUILTIN_RIPGREP=0' >> /home/ralph/.profile \
-    && echo 'export USE_BUILTIN_RIPGREP=0' >> /home/ralph/.bashrc \
     && echo 'alias ccode="claude --dangerously-skip-permissions"' >> /home/ralph/.bashrc \
+    && echo 'alias vi=vim' >> /home/ralph/.bashrc \
+    && echo 'set -o vi' >> /home/ralph/.bashrc \
     && chown ralph:ralph /home/ralph/.profile /home/ralph/.bashrc
 
 # Copy parinfer-rust from builder stage
@@ -99,6 +99,7 @@ USER root
 # Add Claude setup script and resources
 COPY scripts/claude-setup-clojure /usr/local/bin/claude-setup-clojure
 COPY scripts/resources/.cljfmt.edn /usr/local/share/claude-clojure/.cljfmt.edn
+COPY scripts/resources/.clojure /home/ralph/.clojure
 RUN chmod +x /usr/local/bin/claude-setup-clojure \
     && mkdir -p /usr/local/share/claude-clojure
 
