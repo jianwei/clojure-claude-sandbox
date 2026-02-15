@@ -1,5 +1,10 @@
 # Stage 1: Build parinfer-rust (use Debian for build, we only copy the binary)
 FROM rust:slim AS parinfer-builder
+# Configure Aliyun mirror for Debian
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+# Configure cargo mirror (TUNA) for faster crate downloads
+RUN mkdir -p /root/.cargo && echo '[source.crates-io]\nreplace-with = "tuna"\n[source.tuna]\nregistry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"' > /root/.cargo/config.toml
 RUN apt-get update && apt-get install -y \
     git \
     libclang-dev \
@@ -9,13 +14,17 @@ RUN apt-get update && apt-get install -y \
     && strip /tmp/parinfer-rust/target/release/parinfer-rust
 
 # Stage 2: Node.js (for Claude Code)
-FROM node:20-alpine AS node-builder
+FROM node:20 AS node-builder
 
 # Stage 3: Get Babashka
 FROM babashka/babashka:latest AS babashka
 
-# Stage 4: Final image
-FROM eclipse-temurin:21-jdk-alpine
+# Stage 4: Final image (Ubuntu 24.04)
+FROM eclipse-temurin:21-jdk-noble
+
+# Configure Aliyun mirror for Ubuntu
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list.d/ubuntu.sources \
+    && sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list.d/ubuntu.sources
 
 # Build metadata labels
 ARG BUILD_DATE
@@ -28,36 +37,35 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.title="Clojure Node Claude Development Environment" \
       org.opencontainers.image.description="Docker image for Clojure development with Claude Code integration"
 
-# Install Clojure CLI tools, glibc compatibility, and sudo
+# Install Clojure CLI tools and sudo
 ENV CLOJURE_VERSION=1.11.1.1435
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     git \
-    openssh \
+    openssh-client \
     ca-certificates \
     rlwrap \
-    gcompat \
     sudo \
     vim \
     ripgrep \
     && curl -L -O https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh \
     && chmod +x linux-install.sh \
     && ./linux-install.sh \
-    && rm linux-install.sh
+    && rm linux-install.sh \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create ralph user with sudo access
-RUN adduser -D -s /bin/bash ralph \
+RUN useradd -m -s /bin/bash ralph \
     && echo "ralph ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Copy Node.js and npm from node image
 COPY --from=node-builder /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=node-builder /opt/yarn-* /opt/
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
-# Copy Babashka from official image (needs gcompat for glibc compatibility)
+# Copy Babashka from official image
 COPY --from=babashka /usr/local/bin/bb /usr/local/bin/bb
 
 # Install bbin and configure environment for ralph
@@ -82,6 +90,9 @@ USER ralph
 ENV PATH="/usr/local/bin:/home/ralph/.npm-global/bin:/home/ralph/.local/bin:${PATH}"
 ENV NPM_CONFIG_PREFIX="/home/ralph/.npm-global"
 
+# Configure npm to use npmmirror (TaoBao) for faster downloads
+RUN npm config set registry https://registry.npmmirror.com
+
 # Install Claude Code as ralph user (allows ralph to update it)
 RUN npm install -g @anthropic-ai/claude-code
 
@@ -100,7 +111,9 @@ USER root
 COPY scripts/claude-setup-clojure /usr/local/bin/claude-setup-clojure
 COPY scripts/resources/.cljfmt.edn /usr/local/share/claude-clojure/.cljfmt.edn
 COPY scripts/resources/.clojure /home/ralph/.clojure
-RUN chmod +x /usr/local/bin/claude-setup-clojure \
+# Fix CRLF line endings from Windows git checkout
+RUN sed -i 's/\r$//' /usr/local/bin/claude-setup-clojure \
+    && chmod +x /usr/local/bin/claude-setup-clojure \
     && mkdir -p /usr/local/share/claude-clojure
 
 # Verification (as ralph user)
